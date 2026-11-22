@@ -2,6 +2,7 @@ import { currentUser } from "@/lib/auth";
 import { sameOrigin } from "@/lib/origin";
 import { mutateWorkspace, readWorkspace, workspaceErrorResponse } from "@/lib/workspace";
 
+// Carga los datos del panel para la sesión y la empresa solicitadas. Evita almacenar la respuesta privada en caché.
 export async function GET(request: Request) {
   try {
     const user = await currentUser();
@@ -13,6 +14,7 @@ export async function GET(request: Request) {
   }
 }
 
+// Recibe las ediciones del panel, limita el tamaño del contenido y delega la validación y los permisos a mutateWorkspace.
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return Response.json({ error: "Origen no permitido." }, { status: 403 });
   try {

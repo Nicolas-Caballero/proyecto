@@ -3,6 +3,8 @@ import test from "node:test";
 import { computeBusinessDue, defaultBusinessHours } from "../src/lib/business-time";
 
 test("el plazo laboral salta el fin de semana y aplica el cambio de hora de Madrid", () => {
+  // El viernes quedan 30 minutos hábiles. Los otros 60 se cuentan el lunes,
+  // cuando Madrid ya ha pasado del horario de invierno al de verano.
   const due = computeBusinessDue(
     "2026-03-27T16:30:00Z",
     "Europe/Madrid",

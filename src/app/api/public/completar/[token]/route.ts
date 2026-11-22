@@ -1,5 +1,6 @@
 import { publicErrorResponse, readPublicJson, submitCompletionForm } from "../../../../../lib/public";
 
+// Envía las respuestas del cliente al flujo que verifica y consume el token.
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   try {

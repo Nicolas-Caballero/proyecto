@@ -1,3 +1,4 @@
+/* La página pública recibe el color de marca desde la configuración de la empresa. */
 .shell {
   --brand: #205b4b;
   min-height: 100svh;
@@ -6,6 +7,7 @@
   color: #212b26;
 }
 
+/* Cabecera con logotipo o iniciales cuando el logotipo no está configurado. */
 .container { width: min(100%, 984px); margin: 0 auto; }
 .header { display: flex; align-items: center; gap: 12px; min-height: 86px; border-bottom: 1px solid #dce2d9; }
 .logo { width: 40px; height: 40px; border-radius: 12px; object-fit: cover; }
@@ -21,6 +23,7 @@
   font-size: 14px;
 }
 .companyName { font-size: 16px; font-weight: 750; letter-spacing: -.02em; }
+/* En pantallas anchas, la introducción y la tarjeta comparten la misma fila. */
 .layout { display: grid; grid-template-columns: .78fr 1.22fr; gap: 58px; padding-top: 54px; align-items: start; }
 .intro { padding-top: 16px; }
 .eyebrow { color: #53645a; font-size: 12px; font-weight: 700; letter-spacing: .065em; text-transform: uppercase; }
@@ -35,6 +38,8 @@
 }
 .cardTitle { margin: 0 0 4px; font-size: 24px; letter-spacing: -.035em; }
 .cardDescription { margin: 0 0 20px; color: #5f6a63; line-height: 1.55; font-size: 14px; }
+
+/* Controles amplios para pantallas táctiles y foco visible para el teclado. */
 .form { display: grid; gap: 17px; }
 .field { min-width: 0; display: grid; align-content: start; gap: 6px; }
 .field label, .check { color: #29372e; font-size: 14px; font-weight: 650; }
@@ -59,7 +64,10 @@
 .check { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .check input { accent-color: var(--brand); width: 18px; height: 18px; }
 .required { color: #66756c; font-weight: 500; }
+/* Conserva el campo señuelo en el formulario y fuera del área visible. */
 .trap { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+
+/* Estilos de error, envío, contraste del botón y confirmación. */
 .error { padding: 11px 13px; border-radius: 8px; background: #fff1ee; color: #8b3527; font-size: 14px; }
 .button {
   appearance: none;
@@ -94,6 +102,8 @@
 }
 .success .cardDescription { margin-bottom: 0; }
 .unavailable { max-width: 530px; padding-top: 64px; margin: 0 auto; }
+
+/* En móvil se apilan las secciones y, si hace falta, los campos de contacto. */
 @media (max-width: 740px) {
   .shell { padding: 0 18px 30px; }
   .header { min-height: 66px; }

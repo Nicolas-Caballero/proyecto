@@ -1,3 +1,4 @@
+// Permite ejecutar la semilla desde la consola con la configuración local.
 import "./env";
 import type { PoolClient } from "pg";
 import { reconcileRequestJobs, type AutomationCompany, type AutomationRequest } from "../src/lib/automation";
@@ -5,12 +6,15 @@ import { computeBusinessDue } from "../src/lib/business-time";
 import { closeDb, transaction, type CompanyRole } from "../src/lib/db";
 import { applyPreset, type PresetKey, type PresetStatus } from "../src/lib/presets";
 
+// Los identificadores coinciden con las cuentas ficticias de inicio de sesión.
 const marta = "00000000-0000-4000-8000-000000000001";
 const lucia = "00000000-0000-4000-8000-000000000002";
 const diego = "00000000-0000-4000-8000-000000000003";
 const hoursMs = 60 * 60 * 1000;
+// Todas las fechas se calculan a partir del mismo instante.
 const now = Date.now();
 
+// La semilla especifica servicios por posición y estados por tipo para resolver sus UUID al insertar.
 type DemoRequest = {
   name: string;
   status: PresetStatus["kind"];
@@ -29,6 +33,7 @@ type DemoRequest = {
   answers: Record<string, string>;
 };
 
+// Describe una empresa demo, sus miembros y el historial inicial de solicitudes.
 type DemoCompany = {
   id: string;
   slug: string;
@@ -38,6 +43,7 @@ type DemoCompany = {
   requests: DemoRequest[];
 };
 
+// Marta puede alternar entre las dos empresas. Las otras cuentas muestran accesos a una sola.
 const martaUser = { id: marta, name: "Marta Ruiz", email: "marta@pulso.demo", role: "admin" as const };
 const companies: DemoCompany[] = [
   {
@@ -46,6 +52,7 @@ const companies: DemoCompany[] = [
     name: "Estudio Norte",
     preset: "salon",
     members: [martaUser, { id: lucia, name: "Lucía Morales", email: "lucia@pulso.demo", role: "employee" }],
+    // La peluquería incluye altas recientes, citas, casos vencidos y cierres con distintos resultados.
     requests: [
       { name: "Alba Martín", status: "open", priority: "high", source: "instagram", service: 2, ageHours: 68, answers: { disponibilidad: "Esta semana por la tarde", comentarios: "Quiero aclarar un poco las puntas." } },
       { name: "Clara Jiménez", status: "open", source: "web", service: 0, assignedTo: lucia, ageHours: 45, answers: { disponibilidad: "Después de las 16:30" } },
@@ -63,6 +70,7 @@ const companies: DemoCompany[] = [
     name: "Motor Barrio",
     preset: "workshop",
     members: [{ id: diego, name: "Diego Ramos", email: "diego@pulso.demo", role: "admin" }, martaUser],
+    // El taller permite demostrar un presupuesto pendiente y un caso ganado tras un seguimiento.
     requests: [
       { name: "Samuel Pérez", status: "quote", priority: "high", source: "google", service: 3, assignedTo: diego, ageHours: 109, responseMinutes: 51, answers: { vehiculo: "Seat León", problema: "Vibración al frenar", matricula: "0000 AAA" } },
       { name: "Laura Molina", status: "waiting", source: "web", service: 1, assignedTo: diego, ageHours: 70, responseMinutes: 29, action: { text: "Pedir el año del vehículo", hours: 8 }, answers: { vehiculo: "Renault Clio", problema: "Testigo del motor encendido" } },
@@ -73,10 +81,12 @@ const companies: DemoCompany[] = [
   },
 ];
 
+/** Convierte un desplazamiento firmado de horas en una fecha de demostración. */
 function fromNow(hours: number) {
   return new Date(now + hours * hoursMs);
 }
 
+/** Persiste una solicitud ficticia y reconstruye su actividad y automatizaciones. */
 async function insertRequest(
   db: PoolClient,
   company: AutomationCompany,
@@ -85,6 +95,7 @@ async function insertRequest(
   statusId: string,
   index: number,
 ) {
+  // Calcula las fechas de actividad y el vencimiento con el horario de la empresa.
   const createdAt = fromNow(-request.ageHours);
   const responseAt = request.responseMinutes == null ? null : new Date(createdAt.getTime() + request.responseMinutes * 60_000);
   const stateChangedAt = request.status === "open" ? createdAt : new Date(createdAt.getTime() + 5 * hoursMs);
@@ -92,6 +103,7 @@ async function insertRequest(
   const updatedAt = closedAt ?? (request.status === "open" ? responseAt ?? createdAt : stateChangedAt);
   const appointmentAt = request.appointmentHours ? fromNow(request.appointmentHours) : null;
   const slaDueAt = computeBusinessDue(createdAt, company.timezone, company.business_hours, company.first_response_minutes);
+  // Normaliza el nombre para generar un correo bajo un dominio reservado para pruebas.
   const emailName = request.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replaceAll(" ", ".");
   const { rows: [inserted] } = await db.query<AutomationRequest>(
     `INSERT INTO requests (
@@ -110,6 +122,7 @@ async function insertRequest(
     ],
   );
 
+  // La línea temporal empieza con la recepción y añade un contacto cuando consta una respuesta.
   await db.query(
     `INSERT INTO events (company_id, request_id, kind, body, created_at)
      VALUES ($1,$2,'created',$3,$4)`,
@@ -122,6 +135,7 @@ async function insertRequest(
       [company.id, inserted.id, request.assignedTo ?? null, "Primer contacto registrado con el cliente.", responseAt],
     );
   }
+  // Algunos casos incluyen un seguimiento completado antes del cierre para probar la métrica.
   if (request.followedUp) {
     await db.query(
       `INSERT INTO follow_ups (company_id, request_id, assigned_to, message, due_at, completed_at, created_at)
@@ -131,6 +145,7 @@ async function insertRequest(
         new Date(createdAt.getTime() + 48 * hoursMs)],
     );
   }
+  // Los cierres reciben su evento histórico. Las solicitudes abiertas programan los trabajos aplicables.
   if (closedAt) {
     await db.query(
       `INSERT INTO events (company_id, request_id, author_id, kind, body, created_at)
@@ -142,19 +157,23 @@ async function insertRequest(
   if (!closedAt) await reconcileRequestJobs(db, company, inserted);
 }
 
+/** Crea una empresa demo completa y devuelve si añadió datos. */
 async function seedCompany(db: PoolClient, company: DemoCompany) {
+  // Un identificador existente indica que la empresa ya se cargó.
   const inserted = await db.query(
     "INSERT INTO companies(id, slug, name) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
     [company.id, company.slug, company.name],
   );
   if (!inserted.rowCount) return false;
   await applyPreset(db, company.id, company.preset);
+  // Las claves foráneas de los responsables requieren que los miembros existan primero.
   for (const { id, name, email, role } of company.members) {
     await db.query(
       "INSERT INTO memberships(company_id, user_id, name, email, role) VALUES ($1,$2,$3,$4,$5)",
       [company.id, id, name, email, role],
     );
   }
+  // Recupera los identificadores que generó PostgreSQL al copiar la plantilla.
   const { rows: [configured] } = await db.query<AutomationCompany>("SELECT * FROM companies WHERE id = $1", [company.id]);
   const { rows: services } = await db.query<{ id: string; name: string }>(
     "SELECT id,name FROM services WHERE company_id = $1 ORDER BY position", [company.id],
@@ -171,7 +190,9 @@ async function seedCompany(db: PoolClient, company: DemoCompany) {
   return true;
 }
 
+/** Carga ambas empresas ficticias en una sola transacción y resume el resultado. */
 async function seed() {
+  // La semilla requiere un entorno que admita la demo y el correo simulado.
   if (process.env.DEMO_MODE === "false" || process.env.MAIL_MODE === "resend") {
     throw new Error("Usa una base de demostración y el modo de correo simulado para cargar los datos ficticios.");
   }
@@ -185,6 +206,7 @@ async function seed() {
   console.log(loaded.length ? `Datos de demostración cargados: ${loaded.join(", ")}.` : "Los datos de demostración ya están cargados.");
 }
 
+// Comunica los fallos al proceso que llamó al script y libera las conexiones.
 seed()
   .catch((error) => {
     console.error(error);

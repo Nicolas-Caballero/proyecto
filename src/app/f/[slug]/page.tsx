@@ -4,12 +4,14 @@ import { getPublicForm, normalizeSource } from "../../../lib/public";
 import { PublicForm } from "../public-form";
 import { PublicShell, hasLightBrandColor } from "../public-shell";
 
+// La configuración se lee al abrir el formulario para mostrar los últimos cambios.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Enviar una solicitud",
 };
 
+// Carga la empresa del slug y convierte la etiqueta del enlace en el origen de la solicitud.
 export default async function IntakePage({ params, searchParams }: {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ origen?: string | string[]; utm_source?: string | string[] }>;

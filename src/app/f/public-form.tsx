@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { PublicField } from "../../lib/public-types";
 import styles from "./public.module.css";
 
+// El alta usa los servicios y el origen. El enlace de ampliación solo pide campos concretos.
 type FormProps = {
   endpoint: string;
   fields: PublicField[];
@@ -16,6 +17,7 @@ type FormProps = {
   kind: "completion";
 });
 
+// Crea el control HTML que corresponde al tipo de campo y enlaza su etiqueta.
 function DynamicField({ field }: { field: PublicField }) {
   const id = `field-${field.key}`;
   const requiredMark = field.required ? <span className={styles.required} aria-hidden="true"> *</span> : null;
@@ -41,6 +43,7 @@ function DynamicField({ field }: { field: PublicField }) {
   );
 }
 
+// Comparte el formulario interactivo entre el alta y la ampliación de una solicitud.
 export function PublicForm(props: FormProps) {
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [error, setError] = useState("");
@@ -48,16 +51,20 @@ export function PublicForm(props: FormProps) {
   const confirmation = useRef<HTMLDivElement>(null);
   const intake = props.kind === "intake";
 
+  // Mantiene el botón desactivado hasta que React pueda interceptar el envío.
   useEffect(() => setReady(true), []);
 
+  // Lleva el foco a la confirmación para anunciar el resultado tras sustituir el formulario.
   useEffect(() => {
     if (status === "sent") confirmation.current?.focus();
   }, [status]);
 
+  // Recoge los controles y envía al servidor los datos correspondientes a este flujo.
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (status === "sending") return;
     const form = new FormData(event.currentTarget);
+    // Agrupa las respuestas por su clave configurada y guarda las casillas marcadas como booleanos.
     const answers = Object.fromEntries(props.fields.flatMap((field) => {
       const value = form.get(`field-${field.key}`);
       if (typeof value !== "string" || !value.trim()) return [];
@@ -72,6 +79,7 @@ export function PublicForm(props: FormProps) {
       website: form.get("website"),
       answers,
     } : { answers };
+    // Comunica los errores de validación o conexión y permite reintentar el envío.
     setError("");
     setStatus("sending");
     try {
@@ -93,6 +101,7 @@ export function PublicForm(props: FormProps) {
     }
   }
 
+  // Una confirmación del servidor sustituye los controles por el mensaje de éxito.
   if (status === "sent") {
     return (
       <div ref={confirmation} className={styles.success} role="status" tabIndex={-1}>
@@ -135,6 +144,7 @@ export function PublicForm(props: FormProps) {
                 </select>
               </div>
             )}
+            {/* El campo señuelo queda fuera de la vista y de la navegación con teclado. */}
             <div className={styles.trap} aria-hidden="true">
               <label htmlFor="form-website">Sitio web</label>
               <input id="form-website" name="website" autoComplete="off" tabIndex={-1} />

@@ -7,6 +7,8 @@ import type { DashboardData } from "../src/components/dashboard-types";
 import { closeDb } from "../src/lib/db";
 import { runJobs } from "../src/lib/automation";
 
+// Las comprobaciones HTTP usan una instancia demo. La conexión SQL permite
+// preparar situaciones precisas y verificar qué datos quedaron guardados.
 const app = (process.env.TEST_APP_URL || "http://localhost:3000").replace(/\/$/, "");
 const run = `prueba-${randomUUID().slice(0, 8)}`;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 5000 });
@@ -18,6 +20,7 @@ let employee: string;
 let salon: DashboardData;
 let workshop: DashboardData;
 
+/** Completa el inicio de sesión de la demo y conserva la cookie para las siguientes peticiones. */
 async function login(account: string) {
   const response = await fetch(`${app}/api/auth/login`, {
     method: "POST",
@@ -32,6 +35,7 @@ async function login(account: string) {
   return cookie.split(";", 1)[0];
 }
 
+/** Reproduce las peticiones del navegador, con sesión y JSON solo cuando el caso los necesita. */
 async function call(path: string, options: { cookie?: string; data?: object } = {}) {
   const { cookie, data } = options;
   return fetch(app + path, {
@@ -46,27 +50,32 @@ async function call(path: string, options: { cookie?: string; data?: object } = 
   });
 }
 
+/** Añade un detalle breve al fallo y deja el cuerpo disponible para las comprobaciones posteriores. */
 async function expectStatus(response: Response, status: number) {
   const detail = response.status !== status && response.headers.get("content-type")?.includes("application/json")
     ? (await response.clone().text()).slice(0, 500) : response.statusText;
   assert.equal(response.status, status, detail);
 }
 
+/** Carga la misma vista de empresa que consume el panel. */
 async function workspace(company: string, cookie = admin) {
   const response = await call(`/api/workspace?company=${encodeURIComponent(company)}`, { cookie });
   await expectStatus(response, 200);
   return response.json() as Promise<DashboardData>;
 }
 
+/** Envía una acción con la sesión indicada para comprobar los permisos de cada rol. */
 async function action(company: string, data: object, cookie = admin) {
   return call("/api/workspace", { cookie, data: { company, ...data } });
 }
 
+/** Simplifica las acciones cuyo éxito es un requisito para continuar la prueba. */
 async function change(company: string, data: object) {
   const response = await action(company, data);
   assert.ok(response.ok, await response.text());
 }
 
+/** Crea una empresa aislada mediante la API y guarda su ID para poder eliminarla al finalizar. */
 async function addCompany(industry: "workshop" | "salon") {
   const name = `${run}-${companiesToDelete.length + 1}`;
   await change(slug.salon, { action: "createCompany", name, industry });
@@ -79,6 +88,7 @@ async function addCompany(industry: "workshop" | "salon") {
   return { ...company, settings: resultData.company };
 }
 
+/** Construye datos válidos a partir de los campos obligatorios de la empresa. */
 async function publicPayload(companyId: string) {
   const services = await pool.query<{ id: string }>(
     "SELECT id FROM services WHERE company_id = $1 AND active ORDER BY position LIMIT 1", [companyId],
@@ -100,6 +110,7 @@ async function publicPayload(companyId: string) {
   };
 }
 
+/** Prepara solicitudes con estados o plazos concretos para ejercitar operaciones posteriores. */
 async function addRequest(companyId: string, statusId: string, options: {
   source?: string; assignedTo?: string; slaDueAt?: Date;
 } = {}) {
@@ -111,6 +122,8 @@ async function addRequest(companyId: string, statusId: string, options: {
   return result.rows[0].id;
 }
 
+// La suite necesita dos sesiones, los datos demo y correo simulado tanto en
+// este proceso como en la aplicación que recibe las peticiones.
 before(async () => {
   assert.ok(process.env.DATABASE_URL, "Configura DATABASE_URL con la misma base local de la aplicación de prueba");
   assert.equal(process.env.MAIL_MODE === "resend", false, "Las pruebas usan correo simulado");
@@ -120,6 +133,8 @@ before(async () => {
   assert.equal(salon.mailMode, "simulated", "Inicia la aplicación de prueba con correo simulado");
 });
 
+// Se retiran únicamente las empresas creadas durante esta ejecución.
+// Las conexiones se cierran incluso si falla el borrado.
 after(async () => {
   try {
     if (companiesToDelete.length) {
@@ -130,6 +145,7 @@ after(async () => {
   }
 });
 
+// La configuración de cada empresa debe verse dentro del panel y en su formulario público.
 test("las dos empresas utilizan formularios y estados propios", async () => {
   assert.ok(salon.company && workshop.company);
   const labels = (data: DashboardData) => data.company!.fields.map((field) => field.label);
@@ -148,6 +164,8 @@ test("las dos empresas utilizan formularios y estados propios", async () => {
 });
 
 test("la sesión de empleado y PostgreSQL aíslan búsquedas, cambios, CSV y trabajos", async () => {
+  // El empleado del salón debe ver su empresa y recibir un rechazo al pedir
+  // datos del taller, incluso si conoce el identificador de una solicitud.
   assert.ok(salon.company && workshop.company);
   const workshopRequest = workshop.requests[0];
   assert.ok(workshopRequest);
@@ -171,6 +189,8 @@ test("la sesión de empleado y PostgreSQL aíslan búsquedas, cambios, CSV y tra
   assert.match(csv.headers.get("content-type") ?? "", /text\/csv/);
   assert.ok(!(await csv.text()).includes(workshopRequest.id));
 
+  // Se comprueba el aislamiento directamente en PostgreSQL con los roles que
+  // usa la aplicación. Las transacciones revierten los intentos de escritura.
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -184,6 +204,7 @@ test("la sesión de empleado y PostgreSQL aíslan búsquedas, cambios, CSV y tra
     assert.equal((await db.query("UPDATE requests SET priority = 'high' WHERE id = $1", [workshopRequest.id])).rowCount, 0);
     await db.query("ROLLBACK");
 
+    // El ejecutor también debe quedar limitado a la empresa del contexto actual.
     await db.query("BEGIN");
     await db.query("SET LOCAL ROLE app_worker");
     await db.query("SELECT set_config('app.company_id', $1, true)", [salon.company.id]);
@@ -198,6 +219,8 @@ test("la sesión de empleado y PostgreSQL aíslan búsquedas, cambios, CSV y tra
 });
 
 test("un envío público validado llega a la bandeja, se asigna y se cierra", async () => {
+  // Se envía primero un formulario incompleto para comprobar la validación.
+  // El envío válido debe llegar a la bandeja con su origen y el acuse simulado.
   const company = await addCompany("salon");
   const publicPath = `/api/public/f/${company.slug}`;
   const payload = await publicPayload(company.id);
@@ -215,6 +238,8 @@ test("un envío público validado llega a la bandeja, se asigna y se cierra", as
   const member = opened.members.find(({ role }) => role === "admin");
   assert.ok(member);
 
+  // Solo el contacto humano fija la primera respuesta. El cierre conserva
+  // la asignación y el importe confirmado.
   await change(company.slug, { action: "updateRequest", requestId: id, assigneeId: member.id });
   await change(company.slug, { action: "addEvent", requestId: id, kind: "note", text: "Nota interna de prueba" });
   assert.equal((await workspace(company.slug)).requests.find((item) => item.id === id)?.firstResponseAt, null);
@@ -232,6 +257,7 @@ test("un envío público validado llega a la bandeja, se asigna y se cierra", as
 });
 
 test("la solicitud vencida figura en Requiere atención por estar fuera de plazo", async () => {
+  // Al asignarla antes de vencer, el único motivo de atención comprobado es el plazo.
   const company = await addCompany("salon");
   const open = company.settings.statuses.find((status) => status.kind === "open");
   const dashboard = await workspace(company.slug);
@@ -247,6 +273,8 @@ test("la solicitud vencida figura en Requiere atención por estar fuera de plazo
 });
 
 test("los ejecutores concurrentes generan un único seguimiento de presupuesto", async () => {
+  // Se preparan dos empresas para comprobar tanto la deduplicación como
+  // el alcance de una ejecución solicitada para una sola empresa.
   const company = await addCompany("workshop");
   const other = await addCompany("workshop");
   const open = company.settings.statuses.find((status) => status.kind === "open");
@@ -268,6 +296,7 @@ test("los ejecutores concurrentes generan un único seguimiento de presupuesto",
   assert.equal(jobs.rows[0].status, "pending");
   const otherJobs = await findQuote(otherId);
   assert.equal(otherJobs.rowCount, 1);
+  // Avanzar el reloj del ejecutor evita tener que esperar días reales.
   const now = new Date(jobs.rows[0].available_at.getTime() + 1000);
   await Promise.all([runJobs({ companyId: company.id, now }), runJobs({ companyId: company.id, now })]);
   await runJobs({ companyId: company.id, now });
@@ -280,6 +309,7 @@ test("los ejecutores concurrentes generan un único seguimiento de presupuesto",
 });
 
 test("reprogramar y cancelar la cita invalida sus recordatorios pendientes", async () => {
+  // Una cita confirmada debe programar su recordatorio en la cola.
   const company = await addCompany("salon");
   const open = company.settings.statuses.find((status) => status.kind === "open");
   const confirmed = company.settings.statuses.find((status) => status.kind === "appointment");
@@ -298,6 +328,8 @@ test("reprogramar y cancelar la cita invalida sus recordatorios pendientes", asy
   assert.equal(initial.rowCount, 1);
   assert.equal(initial.rows[0].status, "pending");
 
+  // Cambiar la fecha sustituye el trabajo anterior. Quitar la fecha
+  // cancela el nuevo incluso si después se ejecuta el procesador.
   await change(company.slug, { action: "updateRequest", requestId, appointmentAt: rescheduled.toISOString() });
   assert.deepEqual((await listReminders()).rows.map((job) => job.status), ["cancelled", "pending"]);
   await runJobs({ companyId: company.id, now: new Date(initial.rows[0].available_at.getTime() + 1000) });
@@ -306,6 +338,7 @@ test("reprogramar y cancelar la cita invalida sus recordatorios pendientes", asy
   await runJobs({ companyId: company.id, now: new Date(rescheduled.getTime() + day) });
   assert.deepEqual((await listReminders()).rows.map((job) => job.status), ["cancelled", "cancelled"]);
 
+  // Salir del estado de cita confirmada invalida también un recordatorio nuevo.
   const thirdDate = new Date(rescheduled.getTime() + 3 * day).toISOString();
   await change(company.slug, { action: "updateRequest", requestId, status: confirmed.id, appointmentAt: thirdDate });
   assert.equal((await listReminders()).rows.at(-1)?.status, "pending");
@@ -315,6 +348,7 @@ test("reprogramar y cancelar la cita invalida sus recordatorios pendientes", asy
 });
 
 test("un enlace de datos permite completar solo su solicitud y su selección una vez", async () => {
+  // La segunda solicitud sirve para detectar cambios fuera del alcance del enlace.
   const company = await addCompany("workshop");
   const open = company.settings.statuses.find((status) => status.kind === "open");
   assert.ok(open);
@@ -323,6 +357,8 @@ test("un enlace de datos permite completar solo su solicitud y su selección una
   const field = company.settings.fields.find(({ label }) => label.toLocaleLowerCase("es").includes("matrícula"));
   assert.ok(field);
 
+  // Se recupera el enlace del correo simulado que recibiría el cliente.
+  // La página pública debe mostrar el campo solicitado sin exigir una sesión.
   await change(company.slug, { action: "requestInfo", requestId, fields: [field.id] });
   await runJobs({ companyId: company.id });
   const messages = await pool.query<{ body: string }>(
@@ -341,6 +377,8 @@ test("un enlace de datos permite completar solo su solicitud y su selección una
   await expectStatus(page, 200);
   assert.ok((await page.text()).includes(field.label));
 
+  // El enlace se puede usar una vez y solo para los campos autorizados
+  // de la solicitud a la que quedó asociado.
   const tampered = `${slug.salon}.${token.split(".")[1]}`;
   await expectStatus(await call(`/api/public/completar/${encodeURIComponent(tampered)}`, {
     data: { answers: { [key]: "1234BCD" } },

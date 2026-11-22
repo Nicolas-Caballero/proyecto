@@ -1,5 +1,7 @@
+// Comparte los tipos de campo con el formulario público para mantener las mismas opciones en el editor.
 import type { FieldType } from '../lib/public-types';
 
+// Estas claves representan roles, plantillas, automatizaciones y estados del dominio en la API del panel.
 export type DashboardRole = 'admin' | 'employee';
 export type Industry = 'salon' | 'workshop' | 'renovation' | 'custom';
 export type RuleKey = 'acknowledgment' | 'sla' | 'information' | 'quoteFollowup' | 'appointmentReminder';
@@ -7,6 +9,7 @@ export type RequestPriority = 'low' | 'normal' | 'high';
 export type RequestOutcome = 'won' | 'lost';
 export type StatusKind = 'open' | 'waiting' | 'quote' | 'appointment' | 'closed';
 
+// Define un campo configurable. La lista de opciones se usa para los campos desplegables.
 export interface DashboardField {
   id: string;
   label: string;
@@ -15,6 +18,7 @@ export interface DashboardField {
   options?: string[];
 }
 
+// Combina la presentación de un estado con el tipo que utiliza el motor de solicitudes.
 export interface DashboardStatus {
   id: string;
   label: string;
@@ -22,6 +26,7 @@ export interface DashboardStatus {
   kind: StatusKind;
 }
 
+// Reúne la configuración editable y el rol que tiene la cuenta actual en esta empresa.
 export interface DashboardCompany {
   id: string;
   slug: string;
@@ -31,13 +36,17 @@ export interface DashboardCompany {
   logoUrl: string;
   color: string;
   timezone: string;
+  // El horario usa días numerados desde el domingo y horas locales en la zona de la empresa.
   businessHours: { weekdays: number[]; start: string; end: string };
+  // El orden de servicios, campos y estados corresponde al que se presenta en los selectores.
   services: string[];
   fields: DashboardField[];
   statuses: DashboardStatus[];
+  // Las reglas comparten activación y plantilla. Cada una admite los parámetros que necesita.
   rules: Record<RuleKey, { enabled: boolean; template: string; delay?: number; automatic?: boolean }>;
 }
 
+// Representa a un integrante que puede asignarse como responsable dentro de la empresa.
 export interface DashboardMember {
   id: string;
   name: string;
@@ -45,6 +54,7 @@ export interface DashboardMember {
   role: DashboardRole;
 }
 
+// Cada entrada del historial identifica la acción, su autor y el instante en que se registró.
 export interface DashboardEvent {
   id: string;
   kind: string;
@@ -53,6 +63,7 @@ export interface DashboardEvent {
   at: string;
 }
 
+// Proyección que se usa tanto en la bandeja como en el panel lateral de detalle.
 export interface DashboardRequest {
   id: string;
   name: string;
@@ -61,9 +72,11 @@ export interface DashboardRequest {
   service: string;
   subject: string;
   origin: string;
+  // El estado y la asignación referencian las listas de estados y miembros de la empresa.
   status: string;
   priority: RequestPriority;
   assigneeId: string | null;
+  // Las fechas se reciben como cadenas y el valor nulo indica que el hito aún no se produjo o no se programó.
   createdAt: string;
   updatedAt: string;
   firstResponseAt: string | null;
@@ -71,15 +84,18 @@ export interface DashboardRequest {
   followupAt: string | null;
   appointmentAt: string | null;
   nextAction: string | null;
+  // El cierre aporta un resultado y puede incluir el importe si se consiguió o el motivo si se perdió.
   closedAt: string | null;
   outcome: RequestOutcome | null;
   amount: number | null;
   lostReason: string | null;
+  // Las respuestas adicionales se indexan por identificador de campo. El historial y las tareas se incluyen por solicitud.
   data: Record<string, string>;
   events: DashboardEvent[];
   followups: { id: string; createdAt: string; completedAt: string | null; message?: string; dueAt?: string | null; assignedTo?: string | null; }[];
 }
 
+// Describe una ejecución programada y conserva el número de intentos y el error para su revisión.
 export interface DashboardJob {
   id: string;
   requestId: string;
@@ -90,6 +106,7 @@ export interface DashboardJob {
   error: string | null;
 }
 
+// La respuesta del espacio de trabajo distingue las empresas disponibles del contexto seleccionado y su modo de correo.
 export interface DashboardData {
   viewer: { id: string; name: string; email: string };
   companies: Pick<DashboardCompany, 'id' | 'slug' | 'name' | 'role' | 'industry'>[];
@@ -101,9 +118,11 @@ export interface DashboardData {
   mailMode: 'simulated' | 'live';
 }
 
+// La propiedad action distingue el cuerpo de cada operación que recibe la API.
 export type DashboardAction =
   | { action: 'createCompany'; name: string; industry: Industry }
   | { action: 'createRequest'; name: string; email: string; phone: string; service: string; origin: string; priority: RequestPriority; data: Record<string,string> }
+  // Omitir una propiedad conserva su valor. Los campos que admiten null pueden vaciarse.
   | { action: 'updateRequest'; requestId: string; status?: string; priority?: RequestPriority; assigneeId?: string | null; followupAt?: string | null; appointmentAt?: string | null; nextAction?: string | null; outcome?: RequestOutcome; amount?: number | null; lostReason?: string | null }
   | { action: 'addEvent'; requestId: string; kind: 'note' | 'contact' | 'completeFollowup'; text: string; followupId?: string }
   | { action: 'requestInfo'; requestId: string; fields: string[] }
