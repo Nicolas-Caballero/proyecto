@@ -3,6 +3,7 @@ import type { PublicBrand } from "../../lib/public";
 
 import styles from "./public.module.css";
 
+// Calcula la luminancia relativa para elegir un texto con contraste sobre el color de marca.
 export function hasLightBrandColor(color: string) {
   const channels = color.slice(1).match(/.{2}/g) ?? [];
   const linear = channels.map((value) => {
@@ -12,6 +13,7 @@ export function hasLightBrandColor(color: string) {
   return (.2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2]) > .179;
 }
 
+// Reutiliza la cabecera de marca y la composición en las dos páginas públicas.
 export function PublicShell({ brand, completion, children }: { brand: PublicBrand; completion?: boolean; children: ReactNode }) {
   const initials = brand.name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
   return (
@@ -40,6 +42,7 @@ export function PublicShell({ brand, completion, children }: { brand: PublicBran
   );
 }
 
+// Muestra un mensaje genérico cuando falta la empresa o el enlace deja de ser válido.
 export function UnavailableForm({ completion }: { completion?: boolean }) {
   return (
     <main className={styles.shell}>

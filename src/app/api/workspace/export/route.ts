@@ -1,6 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { exportWorkspace, workspaceErrorResponse } from "@/lib/workspace";
 
+// Descarga las solicitudes como CSV. El servicio de exportación comprueba que el usuario sea administrador.
 export async function GET(request: Request) {
   try {
     const user = await currentUser();
@@ -8,6 +9,7 @@ export async function GET(request: Request) {
     const company = new URL(request.url).searchParams.get("company");
     if (!company) return Response.json({ error: "Selecciona una empresa." }, { status: 400 });
     const csv = await exportWorkspace(user, company);
+    // Configura el tipo y el nombre del archivo para que el navegador lo descargue y no lo guarde en caché.
     return new Response(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

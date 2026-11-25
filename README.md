@@ -43,6 +43,13 @@ Abre `http://localhost:3000`. Para reiniciar la base local de Docker en otra ses
 
 Las fechas se almacenan con zona horaria y el panel muestra la hora local de cada empresa. El objetivo de primera respuesta se calcula dentro de su horario laboral. El enlace de datos pendientes caduca y da acceso al formulario acotado de la solicitud que lo originó.
 
+## Recorrido por el código
+
+- La entrada del cliente muestra los campos de su empresa y envía la solicitud para validarla y guardarla en el servidor. [Formulario](src/app/f) · [public.ts](src/lib/public.ts)
+- La bandeja envía las acciones del equipo al servidor, que comprueba el acceso a la empresa y aplica las reglas de gestión. [dashboard.tsx](src/components/dashboard.tsx) · [workspace.ts](src/lib/workspace.ts) · [db.ts](src/lib/db.ts)
+- Las automatizaciones programan trabajos persistentes que se pueden procesar desde la terminal. [automation.ts](src/lib/automation.ts) · [worker.ts](scripts/worker.ts)
+- Las migraciones definen el esquema y las políticas de acceso. Las pruebas recorren los flujos por HTTP y comprueban el resultado en PostgreSQL. [Migraciones](db/migrations) · [workflow.test.ts](tests/workflow.test.ts)
+
 ## Comprobaciones
 
 ```bash

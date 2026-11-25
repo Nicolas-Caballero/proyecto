@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 
-// Explicit environment values take precedence, including when both files exist.
+// Conserva las variables definidas al lanzar el proceso.
+// Entre los archivos, .env.local tiene prioridad porque se carga primero.
 for (const file of [".env.local", ".env"]) {
   if (existsSync(file)) process.loadEnvFile(file);
 }

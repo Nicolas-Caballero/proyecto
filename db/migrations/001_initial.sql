@@ -1,8 +1,10 @@
+-- Prepara los roles internos que activa el servidor para cada tipo de operación.
 DO $$
 DECLARE
   runtime_role text;
 BEGIN
   FOREACH runtime_role IN ARRAY ARRAY['app_runtime', 'app_worker', 'app_public', 'app_completion'] LOOP
+    -- Los roles se comparten dentro del clúster y operan mediante las políticas RLS.
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = runtime_role) THEN
       EXECUTE format('CREATE ROLE %I NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS', runtime_role);
     END IF;
@@ -11,6 +13,7 @@ BEGIN
 END
 $$;
 
+-- Cada empresa guarda su ruta pública, identidad visual, horario y automatizaciones.
 CREATE TABLE companies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   slug text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(slug) <= 63),
@@ -26,6 +29,7 @@ CREATE TABLE companies (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Una persona autenticada puede tener un rol diferente en cada empresa.
 CREATE TABLE memberships (
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
   user_id uuid NOT NULL,
@@ -34,8 +38,10 @@ CREATE TABLE memberships (
   email text NOT NULL,
   PRIMARY KEY (company_id, user_id)
 );
+-- La búsqueda por usuario alimenta el selector de empresas del panel.
 CREATE INDEX memberships_user_id ON memberships (user_id);
 
+-- Las invitaciones se identifican por empresa y correo normalizado hasta que se reclaman.
 CREATE TABLE company_invitations (
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
   email text NOT NULL CHECK (email = lower(email)),
@@ -46,6 +52,7 @@ CREATE TABLE company_invitations (
 );
 CREATE INDEX company_invitations_email ON company_invitations (email);
 
+-- El catálogo conserva los servicios desactivados para mantener el historial.
 CREATE TABLE services (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
@@ -55,6 +62,7 @@ CREATE TABLE services (
   UNIQUE (company_id, id)
 );
 
+-- Las claves estables enlazan las respuestas con la configuración del formulario.
 CREATE TABLE form_fields (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
@@ -67,6 +75,7 @@ CREATE TABLE form_fields (
   UNIQUE (company_id, key)
 );
 
+-- El nombre y el color se muestran en el panel. El tipo controla el flujo y los trabajos.
 CREATE TABLE statuses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
@@ -77,6 +86,7 @@ CREATE TABLE statuses (
   UNIQUE (company_id, id)
 );
 
+-- Cada solicitud reúne el contacto, sus respuestas y el estado de su gestión.
 CREATE TABLE requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
@@ -90,12 +100,14 @@ CREATE TABLE requests (
   answers jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(answers) = 'object'),
   priority text NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   source text NOT NULL DEFAULT 'web',
+  -- Los instantes guardan el seguimiento, la primera respuesta y el vencimiento calculado.
   next_action text,
   next_action_at timestamptz,
   first_response_at timestamptz,
   sla_due_at timestamptz,
   state_changed_at timestamptz NOT NULL DEFAULT now(),
   appointment_at timestamptz,
+  -- El cierre puede incluir un importe confirmado o explicar el motivo de pérdida.
   outcome text CHECK (outcome IN ('won', 'lost')),
   confirmed_amount numeric(12,2) CHECK (confirmed_amount >= 0),
   loss_reason text,
@@ -103,15 +115,18 @@ CREATE TABLE requests (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (company_id, id),
+  -- Las referencias compuestas limitan servicios, estados y responsables a esta misma empresa.
   FOREIGN KEY (company_id, status_id) REFERENCES statuses (company_id, id),
   FOREIGN KEY (company_id, service_id) REFERENCES services (company_id, id) ON DELETE SET NULL (service_id),
   FOREIGN KEY (company_id, assigned_to) REFERENCES memberships (company_id, user_id) ON DELETE SET NULL (assigned_to)
 );
+-- Los índices sirven a la bandeja, a la detección de vencimientos y a la búsqueda por estado.
 CREATE INDEX requests_inbox ON requests (company_id, created_at DESC);
 CREATE INDEX requests_attention ON requests (company_id, sla_due_at) WHERE closed_at IS NULL AND first_response_at IS NULL;
 CREATE INDEX requests_follow_up ON requests (company_id, next_action_at) WHERE closed_at IS NULL;
 CREATE INDEX requests_by_status ON requests (company_id, status_id);
 
+-- El historial conserva la fecha, la acción y el autor cuando interviene un miembro.
 CREATE TABLE events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL,
@@ -126,6 +141,7 @@ CREATE TABLE events (
 );
 CREATE INDEX events_timeline ON events (company_id, request_id, created_at);
 
+-- La cola persistente guarda cuándo se puede ejecutar cada automatización y sus intentos.
 CREATE TABLE jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL,
@@ -140,13 +156,16 @@ CREATE TABLE jobs (
   executed_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  -- La clave de deduplicación impide encolar dos veces la misma acción en una empresa.
   UNIQUE (company_id, dedupe_key),
   UNIQUE (company_id, request_id, id),
   FOREIGN KEY (company_id, request_id) REFERENCES requests (company_id, id) ON DELETE CASCADE
 );
+-- El índice parcial ayuda al proceso a localizar los trabajos pendientes o fallidos.
 CREATE INDEX jobs_due ON jobs (company_id, available_at) WHERE status = 'pending' OR status = 'failed';
 CREATE INDEX jobs_request ON jobs (company_id, request_id);
 
+-- Un trabajo puede generar una sola tarea de seguimiento por la restricción UNIQUE de job_id.
 CREATE TABLE follow_ups (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL,
@@ -164,6 +183,7 @@ CREATE TABLE follow_ups (
 CREATE INDEX follow_ups_due ON follow_ups (company_id, due_at) WHERE completed_at IS NULL;
 CREATE INDEX follow_ups_request ON follow_ups (company_id, request_id);
 
+-- Cada enlace se registra con su huella, los campos solicitados y el plazo de uso.
 CREATE TABLE completions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL,
@@ -177,6 +197,7 @@ CREATE TABLE completions (
 );
 CREATE INDEX completions_request ON completions (company_id, request_id);
 
+-- El contador distingue empresa, huella del visitante y ventana de tiempo.
 CREATE TABLE public_rate_limits (
   company_id uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
   fingerprint text NOT NULL,
@@ -186,15 +207,18 @@ CREATE TABLE public_rate_limits (
 );
 CREATE INDEX public_rate_limits_age ON public_rate_limits (company_id, bucket);
 
+-- Los auxiliares de las políticas viven en un esquema con permisos explícitos.
 CREATE SCHEMA app_access;
 REVOKE ALL ON SCHEMA app_access FROM PUBLIC;
 GRANT USAGE ON SCHEMA app_access TO app_runtime, app_worker, app_public, app_completion;
 GRANT USAGE ON SCHEMA public TO app_runtime, app_worker, app_public, app_completion;
 
+-- Las variables de transacción identifican la empresa y pueden estar vacías fuera de su contexto.
 CREATE FUNCTION app_access.tenant_id() RETURNS uuid
 LANGUAGE sql STABLE SET search_path = pg_catalog
 RETURN nullif(current_setting('app.company_id', true), '')::uuid;
 
+-- SECURITY DEFINER permite consultar membresías sin volver a activar su propia política.
 CREATE FUNCTION app_access.is_member(tenant uuid, admin_only boolean DEFAULT false) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
@@ -206,6 +230,7 @@ AS $$
   )
 $$;
 
+-- El contexto del enlace acota la solicitud y el código de acceso por separado.
 CREATE FUNCTION app_access.completion_request() RETURNS uuid
 LANGUAGE sql STABLE SET search_path = pg_catalog
 RETURN nullif(current_setting('app.request_id', true), '')::uuid;
@@ -215,6 +240,7 @@ LANGUAGE sql STABLE SET search_path = pg_catalog
 RETURN nullif(current_setting('app.completion_id', true), '')::uuid;
 
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_access FROM PUBLIC;
+-- Cada rol puede llamar a los auxiliares que necesitan sus políticas.
 GRANT EXECUTE ON FUNCTION app_access.tenant_id() TO app_runtime, app_worker, app_public, app_completion;
 GRANT EXECUTE ON FUNCTION app_access.is_member(uuid, boolean) TO app_runtime;
 GRANT EXECUTE ON FUNCTION app_access.completion_request(), app_access.completion_id() TO app_completion;
@@ -224,7 +250,7 @@ DECLARE
   table_name text;
   platform_role text;
 BEGIN
-  -- Revoke default grants on new public tables, including Supabase API roles.
+  -- Activa la seguridad por filas y revoca permisos por defecto, incluidos los de Supabase.
   FOREACH table_name IN ARRAY ARRAY[
     'companies', 'memberships', 'company_invitations', 'services', 'form_fields',
     'statuses', 'requests', 'events', 'jobs', 'follow_ups', 'completions', 'public_rate_limits'
@@ -238,6 +264,7 @@ BEGIN
     END LOOP;
   END LOOP;
 
+  -- Cualquier miembro puede leer la configuración de su empresa. Las escrituras requieren administración.
   FOREACH table_name IN ARRAY ARRAY['services', 'form_fields', 'statuses', 'memberships'] LOOP
     EXECUTE format('CREATE POLICY runtime_read ON %I FOR SELECT TO app_runtime USING (
       company_id = app_access.tenant_id() AND app_access.is_member(company_id)
@@ -249,6 +276,7 @@ BEGIN
     )', table_name);
   END LOOP;
 
+  -- Las operaciones del panel quedan limitadas a una empresa con membresía vigente.
   FOREACH table_name IN ARRAY ARRAY['requests', 'events', 'jobs', 'follow_ups', 'completions'] LOOP
     EXECUTE format('CREATE POLICY runtime_member ON %I TO app_runtime USING (
       company_id = app_access.tenant_id() AND app_access.is_member(company_id)
@@ -257,6 +285,7 @@ BEGIN
     )', table_name);
   END LOOP;
 
+  -- El proceso de automatización solo ve la empresa seleccionada para el trabajo.
   FOREACH table_name IN ARRAY ARRAY[
     'requests', 'events', 'jobs', 'follow_ups', 'completions', 'statuses', 'memberships', 'public_rate_limits'
   ] LOOP
@@ -267,6 +296,7 @@ BEGIN
     )', table_name);
   END LOOP;
 
+  -- El formulario público puede leer catálogos e insertar las solicitudes que recibe.
   FOREACH table_name IN ARRAY ARRAY['services', 'form_fields', 'statuses'] LOOP
     EXECUTE format('CREATE POLICY public_read ON %I FOR SELECT TO app_public USING (
       company_id = app_access.tenant_id()
@@ -281,11 +311,13 @@ BEGIN
 END
 $$;
 
+-- La tabla de empresas usa su propio identificador para aplicar las políticas de acceso.
 CREATE POLICY runtime_read ON companies FOR SELECT TO app_runtime
   USING (id = app_access.tenant_id() AND app_access.is_member(id));
 CREATE POLICY runtime_admin ON companies FOR UPDATE TO app_runtime
   USING (id = app_access.tenant_id() AND app_access.is_member(id, true))
   WITH CHECK (id = app_access.tenant_id() AND app_access.is_member(id, true));
+-- Las invitaciones son privadas incluso para los empleados de la misma empresa.
 CREATE POLICY runtime_admin ON company_invitations TO app_runtime
   USING (company_id = app_access.tenant_id() AND app_access.is_member(company_id, true))
   WITH CHECK (company_id = app_access.tenant_id() AND app_access.is_member(company_id, true));
@@ -293,10 +325,12 @@ CREATE POLICY worker_read ON companies FOR SELECT TO app_worker
   USING (id = app_access.tenant_id());
 CREATE POLICY public_read ON companies FOR SELECT TO app_public
   USING (id = app_access.tenant_id());
+-- El formulario registra el contador de envíos dentro de su empresa.
 CREATE POLICY public_rate ON public_rate_limits TO app_public
   USING (company_id = app_access.tenant_id())
   WITH CHECK (company_id = app_access.tenant_id());
 
+-- Un enlace válido limita la solicitud, el registro del enlace y su nuevo evento.
 CREATE POLICY completion_company ON companies FOR SELECT TO app_completion
   USING (id = app_access.tenant_id());
 CREATE POLICY completion_request ON requests TO app_completion
@@ -308,11 +342,13 @@ CREATE POLICY completion_token ON completions TO app_completion
 CREATE POLICY completion_event ON events FOR INSERT TO app_completion
   WITH CHECK (company_id = app_access.tenant_id() AND request_id = app_access.completion_request());
 
+-- Las concesiones habilitan operaciones y RLS decide sobre qué filas se ejecutan.
 GRANT SELECT, UPDATE ON companies TO app_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON services, form_fields, statuses, company_invitations, memberships TO app_runtime;
 GRANT SELECT, INSERT, UPDATE ON requests, jobs, follow_ups, completions TO app_runtime;
 GRANT SELECT, INSERT ON events TO app_runtime;
--- Deletion deliberately lives in its own admin-only policy below.
+-- Sustituye la política general de solicitudes por permisos explícitos por operación.
+-- La eliminación requiere una membresía de administrador.
 GRANT DELETE ON requests TO app_runtime;
 DROP POLICY runtime_member ON requests;
 CREATE POLICY runtime_read ON requests FOR SELECT TO app_runtime
@@ -325,16 +361,19 @@ CREATE POLICY runtime_update ON requests FOR UPDATE TO app_runtime
 CREATE POLICY runtime_delete ON requests FOR DELETE TO app_runtime
   USING (company_id = app_access.tenant_id() AND app_access.is_member(company_id, true));
 
+-- El proceso programado consulta el contexto del trabajo y registra sus resultados.
 GRANT SELECT ON companies, statuses, memberships, completions TO app_worker;
 GRANT SELECT, UPDATE ON requests TO app_worker;
 GRANT SELECT, INSERT, UPDATE ON jobs, follow_ups TO app_worker;
 GRANT SELECT, INSERT ON events TO app_worker;
 GRANT SELECT, DELETE ON public_rate_limits TO app_worker;
 
+-- Las solicitudes, eventos y trabajos solo admiten inserción con el rol público.
 GRANT SELECT ON companies, statuses, services, form_fields TO app_public;
 GRANT INSERT ON requests, events, jobs TO app_public;
 GRANT SELECT, INSERT, UPDATE ON public_rate_limits TO app_public;
 
+-- Completar un enlace actualiza únicamente las respuestas, la actividad y la marca de uso.
 GRANT SELECT ON companies, requests TO app_completion;
 GRANT UPDATE (answers, updated_at) ON requests TO app_completion;
 GRANT SELECT (id, company_id, request_id, used_at), UPDATE (used_at) ON completions TO app_completion;
