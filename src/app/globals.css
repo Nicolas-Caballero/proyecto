@@ -1225,7 +1225,7 @@ button.dash-stat:hover { border-color: #c8bdf8; }
   }
 }
 @media (max-width: 580px) {
-<<<<<<< HEAD
+ HEAD
   .dash-topbar {
     min-height: 55px;
     padding: 0 12px;
@@ -1323,7 +1323,7 @@ button.dash-stat:hover { border-color: #c8bdf8; }
   .dash-topbar .dash-button.icon-only {
     width: 40px;
   }
-=======
+
   /* En pantallas pequeñas se compacta la cabecera y las tarjetas pasan a dos columnas. */
   .dash-topbar { min-height: 55px; padding: 0 12px; }
   .dash-toplink-text, .dash-crumb-context, .dash-crumb-chevron { display: none; }
@@ -1357,5 +1357,5 @@ button.dash-stat:hover { border-color: #c8bdf8; }
   /* Los botones de la cabecera conservan una superficie táctil consistente en móvil. */
   .dash-topbar .dash-button { min-height: 40px; }
   .dash-topbar .dash-button.icon-only { width: 40px; }
->>>>>>> origin/main
+ origin/main
 }
